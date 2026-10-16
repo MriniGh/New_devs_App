@@ -36,42 +36,33 @@ async def calculate_total_revenue(property_id: str, tenant_id: str) -> Dict[str,
     Aggregates revenue from database.
     """
     try:
-        # Import database pool
-        from app.core.database_pool import DatabasePool
+        # Use the shared database pool
+        from app.core.database_pool import db_pool
         
-        # Initialize pool if needed
-        db_pool = DatabasePool()
-        await db_pool.initialize()
+        # Initialize pool once if needed
+        if not db_pool.pool:
+            await db_pool.initialize()
         
-        if db_pool.session_factory:
-            async with db_pool.get_session() as session:
-                # Use SQLAlchemy text for raw SQL
-                from sqlalchemy import text
-                
-                query = text("""
+        if db_pool.pool:
+            async with db_pool.get_connection() as conn:
+                row = await conn.fetchrow("""
                     SELECT 
                         property_id,
                         SUM(total_amount) as total_revenue,
                         COUNT(*) as reservation_count
                     FROM reservations 
-                    WHERE property_id = :property_id AND tenant_id = :tenant_id
+                    WHERE property_id = $1 AND tenant_id = $2
                     GROUP BY property_id
-                """)
-                
-                result = await session.execute(query, {
-                    "property_id": property_id, 
-                    "tenant_id": tenant_id
-                })
-                row = result.fetchone()
+                """, property_id, tenant_id)
                 
                 if row:
-                    total_revenue = Decimal(str(row.total_revenue))
+                    total_revenue = Decimal(str(row["total_revenue"]))
                     return {
                         "property_id": property_id,
                         "tenant_id": tenant_id,
                         "total": str(total_revenue),
                         "currency": "USD", 
-                        "count": row.reservation_count
+                        "count": row["reservation_count"]
                     }
                 else:
                     # No reservations found for this property
